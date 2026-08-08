@@ -1,0 +1,212 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  --bg: var(--figma-color-bg, #fff);
+  --surface: var(--figma-color-bg-secondary, #f5f5f5);
+  --surface-hover: var(--figma-color-bg-hover, #ebebeb);
+  --text: var(--figma-color-text, #1f1f1f);
+  --text-secondary: var(--figma-color-text-secondary, #6b6b6b);
+  --border: var(--figma-color-border, #dedede);
+  --brand: #6558f5;
+  --brand-soft: color-mix(in srgb, var(--brand) 12%, var(--bg));
+  --success: #19a866;
+  --danger: #d13f3f;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { margin: 0; min-height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  overflow-x: hidden;
+}
+
+button, input { font: inherit; }
+button { color: inherit; }
+
+.app-shell {
+  min-height: 560px;
+  padding: 14px;
+  position: relative;
+}
+
+.topbar, .brand, .language-switch, .secondary-actions, .range-heading, .color-row, .color-control {
+  display: flex;
+  align-items: center;
+}
+
+.topbar { justify-content: space-between; margin-bottom: 12px; }
+.brand { gap: 7px; font-weight: 650; font-size: 13px; }
+.brand-mark { width: 22px; height: 22px; }
+.brand-mark path, .secondary-button svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.badge {
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.language-switch {
+  padding: 2px;
+  background: var(--surface);
+  border-radius: 6px;
+}
+.language-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.language-switch button.active { background: var(--bg); color: var(--text); }
+
+.selection-card {
+  display: flex;
+  gap: 10px;
+  min-height: 66px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: #999;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #999 14%, transparent);
+}
+.selection-line .status-dot, .selection-two-nodes .status-dot, .selection-generated-arrow .status-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 14%, transparent);
+}
+.selection-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.selection-copy strong { font-size: 12px; font-weight: 650; }
+.selection-copy > span { color: var(--text-secondary); line-height: 1.35; }
+.node-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.node-list span {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.control-section { margin-top: 14px; }
+.control-label { margin-bottom: 7px; font-weight: 600; }
+.style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.style-button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 7px 7px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.style-button:hover { background: var(--surface); }
+.style-button.active { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+.style-button svg { display: block; width: 100%; height: 32px; margin-bottom: 3px; }
+.style-button svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 4.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.style-button span { font-size: 11px; color: var(--text-secondary); }
+.style-button.active span { color: var(--text); }
+
+.settings-grid { display: grid; gap: 10px; }
+.field-row { justify-content: space-between; min-height: 28px; }
+.color-control { gap: 7px; }
+.color-control input {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.color-control code { color: var(--text-secondary); font-family: ui-monospace, monospace; font-size: 10px; }
+.range-field { display: grid; gap: 5px; }
+.range-heading { justify-content: space-between; }
+.range-heading output { color: var(--text-secondary); font-size: 10px; }
+input[type="range"] { width: 100%; accent-color: var(--brand); }
+
+.secondary-actions { gap: 8px; margin-top: 14px; }
+.secondary-button {
+  flex: 1;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  cursor: pointer;
+}
+.secondary-button:hover:not(:disabled) { background: var(--surface); }
+.secondary-button.is-active { border-color: var(--brand); color: var(--brand); }
+.secondary-button:disabled { opacity: 0.38; cursor: default; }
+.secondary-button svg { width: 14px; height: 14px; }
+
+.footer-actions { margin-top: 14px; }
+.primary-button {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--brand);
+  color: white;
+  font-weight: 650;
+  cursor: pointer;
+}
+.primary-button:hover:not(:disabled) { filter: brightness(1.06); }
+.primary-button:disabled { background: var(--surface-hover); color: var(--text-secondary); cursor: default; }
+.footer-actions p { margin: 7px 0 0; text-align: center; color: var(--text-secondary); font-size: 10px; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 28px);
+  padding: 8px 11px;
+  border-radius: 7px;
+  color: white;
+  font-weight: 600;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.24);
+  animation: toast-in 150ms ease-out;
+  z-index: 10;
+}
+.toast.success { background: #14784c; }
+.toast.error { background: #aa3030; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 5px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}

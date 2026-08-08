@@ -1,5 +1,5 @@
 import { getStroke } from 'perfect-freehand'
-import type { ArrowSettings } from '../shared/types'
+import { clampSettings, type ArrowSettings } from '../shared/types'
 
 export interface Point {
   x: number
@@ -17,7 +17,13 @@ export interface ArrowGeometry {
   /** @deprecated Prefer shaftPaths. Kept for consumers of the original geometry API. */
   shaftPath: string
   shaftSegments: Point[][]
+  /** The independent editable head paths, painted above the shaft. */
+  headPaths: string[]
   headPath: string
+  /** Extra editable paths used by the emphasis style. */
+  accentPaths: string[]
+  shaftOpacity: number
+  headOpacity: number
   points: Point[]
   start: Point
   end: Point
@@ -170,6 +176,10 @@ export function generateArrowGeometry(
   settings: ArrowSettings,
   seed: number,
 ): ArrowGeometry {
+  // Keep the pure geometry API tolerant of V1/V2 callers that do not yet
+  // provide brush/head fields. The plugin normally clamps before reaching
+  // here, but this also makes migrations and standalone tests safe.
+  settings = clampSettings(settings)
   const directDistance = distance(inputStart, inputEnd)
   if (directDistance < 4) throw new Error('Arrow path is too short')
 
@@ -179,14 +189,23 @@ export function generateArrowGeometry(
   const canonicalLoopRoute = settings.style === 'loop' && directDistance >= 140
     ? createLoopRoute(inputStart, inputEnd, settings.curvature)
     : null
-  const base = canonicalLoopRoute?.points ?? createNaturalPoints(inputStart, inputEnd, settings.curvature)
+  const base = canonicalLoopRoute?.points ?? createStylePoints(inputStart, inputEnd, settings)
   const spacing = clamp(directDistance / 28, 5, 18)
-  // The loop includes an intentional self-intersection. Preserve its authored
-  // points exactly; resampling or random displacement separates the crossing
-  // and makes it read as a circle pasted onto a line.
-  const sampled = settings.style === 'loop' ? base : resamplePolyline(base, spacing)
+  // The loop includes an intentional self-intersection. It is authored at
+  // stable sample positions so the knot can be split into paint layers, but
+  // it still receives the same deterministic low-frequency variation as the
+  // other brushes. The helper keeps both visits locked to one crossing point.
+  const sampled = canonicalLoopRoute ? base : resamplePolyline(base, spacing)
   const canonicalRoughened = settings.style === 'loop'
-    ? sampled.map((point) => ({ ...point }))
+    ? canonicalLoopRoute
+      ? applyLoopHandDrawnNoise(
+        sampled,
+        settings,
+        seed,
+        canonicalLoopRoute.firstVisitIndex,
+        canonicalLoopRoute.secondVisitIndex,
+      )
+      : sampled.map((point) => ({ ...point }))
     : applyHandDrawnNoise(sampled, settings, seed)
   canonicalRoughened[0] = inputStart
   canonicalRoughened[canonicalRoughened.length - 1] = inputEnd
@@ -248,13 +267,22 @@ export function generateArrowGeometry(
     index === 0 && !loopRoute ? 'lead' : index === 0 ? 'lead' : 'steady',
   ))
   const shaftEnd = shaftSegments[shaftSegments.length - 1][shaftSegments[shaftSegments.length - 1].length - 1]
-  const headPath = createRoundedArrowHeadPath(end, endTangent, headLength, settings.strokeWidth, seed)
+  const headPaths = createArrowHeadPaths(end, endTangent, headLength, settings.strokeWidth, settings.headStyle, seed)
+  const accentPaths = settings.style === 'emphasis'
+    ? createEmphasisAccentPaths(end, endTangent, settings, seed)
+    : []
+  const shaftOpacity = settings.brush === 'highlighter' ? 0.38 : settings.brush === 'pencil' ? 0.72 : 1
+  const headOpacity = settings.brush === 'highlighter' ? 0.48 : settings.brush === 'pencil' ? 0.78 : 1
 
   return {
     shaftPaths,
     shaftPath: shaftPaths[0],
     shaftSegments,
-    headPath,
+    headPaths,
+    headPath: headPaths[0],
+    accentPaths,
+    shaftOpacity,
+    headOpacity,
     points: roughened,
     start,
     end,
@@ -309,6 +337,109 @@ function createNaturalPoints(start: Point, end: Point, curvature: number): Point
       add(scale(start, oneMinus * oneMinus), scale(control, 2 * oneMinus * t)),
       scale(end, t * t),
     )
+  })
+}
+
+function createStylePoints(start: Point, end: Point, settings: ArrowSettings): Point[] {
+  if (settings.style === 's-curve') return createSCurvePoints(start, end, settings.curvature)
+  if (settings.style === 'spiral') return createSpiralPoints(start, end, settings.curvature)
+  if (settings.style === 'wave') return createWavePoints(start, end, settings.curvature)
+  // Emphasis uses the same readable lead-in as Natural and adds two separate
+  // marks near the target in createEmphasisAccentPaths.
+  return createNaturalPoints(start, end, settings.curvature)
+}
+
+function createSCurvePoints(start: Point, end: Point, curvature: number): Point[] {
+  const direction = normalize(subtract(end, start))
+  const normal = perpendicular(direction)
+  const length = distance(start, end)
+  const middle = midpoint(start, end)
+  const amount = clamp(length * (0.16 + Math.abs(curvature) * 0.16), 28, 150) * (curvature < 0 ? -1 : 1)
+  const first = sampleCubic(
+    start,
+    add(start, add(scale(direction, length * 0.28), scale(normal, amount))),
+    add(middle, add(scale(direction, -length * 0.2), scale(normal, amount))),
+    middle,
+    Math.max(18, Math.ceil(length / 18)),
+  )
+  const second = sampleCubic(
+    middle,
+    add(middle, add(scale(direction, length * 0.2), scale(normal, -amount))),
+    add(end, add(scale(direction, -length * 0.28), scale(normal, -amount))),
+    end,
+    Math.max(18, Math.ceil(length / 18)),
+  )
+  return [...first.slice(0, -1), ...second]
+}
+
+function createSpiralPoints(start: Point, end: Point, curvature: number): Point[] {
+  const direction = normalize(subtract(end, start))
+  const normal = perpendicular(direction)
+  const length = distance(start, end)
+  const side = curvature < 0 ? -1 : 1
+  const radius = clamp(length * 0.12, 18, 92)
+  const center = add(add(start, scale(direction, length * 0.38)), scale(normal, side * radius * 0.28))
+  const startAngle = side * Math.PI * 0.82
+  const turns = Math.PI * (2.05 + Math.min(0.2, Math.abs(curvature) * 0.2))
+  const spiralStart = add(center, scale(rotate({ x: 1, y: 0 }, startAngle), radius))
+  const lead = sampleCubic(
+    start,
+    add(start, scale(direction, length * 0.22)),
+    subtract(spiralStart, scale(rotate({ x: 1, y: 0 }, startAngle), radius * 0.55)),
+    spiralStart,
+    Math.max(20, Math.ceil(length / 18)),
+  )
+  const spiral = Array.from({ length: 42 }, (_, index) => {
+    const t = index / 41
+    const angle = startAngle + turns * t
+    const radiusAtT = radius * (1 - t * 0.06)
+    return add(center, scale(rotate({ x: 1, y: 0 }, angle), radiusAtT))
+  })
+  const spiralEnd = spiral[spiral.length - 1]
+  const tail = sampleCubic(
+    spiralEnd,
+    add(spiralEnd, scale(direction, length * 0.16)),
+    subtract(end, scale(direction, length * 0.28)),
+    end,
+    Math.max(28, Math.ceil(length / 14)),
+  )
+  return [...lead.slice(0, -1), ...spiral.slice(1, -1), ...tail]
+}
+
+function createWavePoints(start: Point, end: Point, curvature: number): Point[] {
+  const direction = normalize(subtract(end, start))
+  const normal = perpendicular(direction)
+  const length = distance(start, end)
+  const amplitude = clamp(length * (0.08 + Math.abs(curvature) * 0.06), 16, 74)
+  const cycles = 2 + Math.round(Math.abs(curvature) * 1.5)
+  const count = Math.max(42, Math.ceil(length / 10))
+  return Array.from({ length: count + 1 }, (_, index) => {
+    const t = index / count
+    const envelope = Math.sin(Math.PI * t) ** 0.72
+    return add(
+      add(start, scale(direction, length * t)),
+      scale(normal, Math.sin(t * Math.PI * cycles * 2) * amplitude * envelope * (curvature < 0 ? -1 : 1)),
+    )
+  })
+}
+
+function createEmphasisAccentPaths(
+  tip: Point,
+  tangent: Point,
+  settings: ArrowSettings,
+  seed: number,
+): string[] {
+  const normal = perpendicular(tangent)
+  const length = clamp(settings.strokeWidth * 2.6, 26, 74)
+  const spread = length * 0.55
+  const origin = subtract(tip, scale(tangent, length * 0.9))
+  const accentSettings = { ...settings, strokeWidth: settings.strokeWidth * 0.58, roughness: settings.roughness * 0.7 }
+  const random = mulberry32(seed ^ 0x2f6e2b1)
+  return [-1, 1].map((side) => {
+    const from = add(origin, scale(normal, side * spread))
+    const to = add(origin, scale(normal, side * spread * 0.25))
+    const bend = add(midpoint(from, to), scale(tangent, (random() - 0.5) * length * 0.22))
+    return createTaperedStrokeOutline([from, bend, to], accentSettings, 'steady')
   })
 }
 
@@ -575,6 +706,42 @@ function applyHandDrawnNoise(
   })
 }
 
+function applyLoopHandDrawnNoise(
+  points: Point[],
+  settings: ArrowSettings,
+  seed: number,
+  firstVisitIndex: number,
+  secondVisitIndex: number,
+): Point[] {
+  const roughened = applyHandDrawnNoise(points, settings, seed)
+  if (roughened.length === 0) return roughened
+
+  // A loop is a single gesture that happens to cross itself. Keep a short
+  // neighbourhood around both visits on the same authored centreline so the
+  // split VectorNodes meet with a shared tangent instead of producing a kink.
+  const first = points[Math.max(0, Math.min(points.length - 1, firstVisitIndex))]
+  const second = points[Math.max(0, Math.min(points.length - 1, secondVisitIndex))]
+  const crossing = midpoint(first, second)
+  const lockRadius = 2
+  for (let index = 0; index < roughened.length; index += 1) {
+    const nearFirst = Math.abs(index - firstVisitIndex) <= lockRadius
+    const nearSecond = Math.abs(index - secondVisitIndex) <= lockRadius
+    if (nearFirst || nearSecond) {
+      // Keep the authored offset along each local tangent, but share the
+      // crossing itself exactly. This leaves the hand-drawn rhythm visible
+      // immediately before/after the knot while preserving its topology.
+      if (index === firstVisitIndex || index === secondVisitIndex) {
+        roughened[index] = { ...crossing }
+      } else {
+        roughened[index] = { ...points[index] }
+      }
+    }
+  }
+  roughened[0] = { ...points[0] }
+  roughened[roughened.length - 1] = { ...points[points.length - 1] }
+  return roughened
+}
+
 function createTaperedStrokeOutline(
   points: Point[],
   settings: ArrowSettings,
@@ -590,11 +757,16 @@ function createTaperedStrokeOutline(
       : 0.96
     return [point.x, point.y, pressure]
   })
+  const brushOptions = settings.brush === 'ink'
+    ? { thinning: 0.52, smoothing: 0.8, streamline: 0.2 }
+    : settings.brush === 'pencil'
+      ? { thinning: 0.88, smoothing: 0.45, streamline: 0.16 }
+      : settings.brush === 'highlighter'
+        ? { thinning: 0.08, smoothing: 0.86, streamline: 0.34 }
+        : { thinning: 0.76, smoothing: 0.68, streamline: 0.28 }
   const outline = getStroke(input, {
     size: settings.strokeWidth,
-    thinning: 0.76,
-    smoothing: 0.68,
-    streamline: 0.28,
+    ...brushOptions,
     simulatePressure: false,
     last: true,
     start: { cap: true, taper: 0 },
@@ -603,24 +775,71 @@ function createTaperedStrokeOutline(
   return outlineToSvgPath(outline.map(([x, y]) => ({ x, y })))
 }
 
+function createArrowHeadPaths(
+  tip: Point,
+  tangent: Point,
+  length: number,
+  strokeWidth: number,
+  style: ArrowSettings['headStyle'],
+  seed: number,
+): string[] {
+  if (style === 'open') {
+    const normal = perpendicular(tangent)
+    const base = subtract(tip, scale(tangent, length * 0.66))
+    const wing = length * 0.34
+    const nearTip = subtract(tip, scale(tangent, length * 0.08))
+    const headSettings: ArrowSettings = {
+      ...DEFAULT_HEAD_SETTINGS,
+      strokeWidth: Math.max(1, strokeWidth * 0.52),
+    }
+    return [
+      createTaperedStrokeOutline([
+        add(base, scale(normal, strokeWidth * 0.22)),
+        add(nearTip, scale(normal, wing)),
+      ], headSettings, 'steady'),
+      createTaperedStrokeOutline([
+        add(nearTip, scale(normal, -wing)),
+        add(base, scale(normal, -strokeWidth * 0.22)),
+      ], headSettings, 'steady'),
+    ]
+  }
+  const multiplier = style === 'chunky' ? 1.16 : style === 'swallowtail' ? 1.05 : 1
+  return [createRoundedArrowHeadPath(tip, tangent, length * multiplier, strokeWidth, seed, style)]
+}
+
+const DEFAULT_HEAD_SETTINGS: ArrowSettings = {
+  style: 'natural',
+  brush: 'marker',
+  headStyle: 'rounded',
+  color: { r: 0, g: 0, b: 0 },
+  strokeWidth: 8,
+  headScale: 1,
+  curvature: 0,
+  roughness: 0,
+  reversed: false,
+}
+
 function createRoundedArrowHeadPath(
   tip: Point,
   tangent: Point,
   length: number,
   strokeWidth: number,
   seed: number,
+  style: ArrowSettings['headStyle'] = 'rounded',
 ): string {
   const random = mulberry32(seed ^ 0x9e3779b9)
   const normal = perpendicular(tangent)
   // Keep the head expressive but avoid the long, sharp barbs produced by a
   // wide wing placed too far behind the tip.
-  const width = length * (0.36 + random() * 0.02)
+  const widthRatio = style === 'chunky' ? 0.44 : style === 'swallowtail' ? 0.4 : 0.36
+  const width = length * (widthRatio + random() * 0.02)
   const base = subtract(tip, scale(tangent, length * 0.62))
   const neck = Math.max(strokeWidth * 0.58, width * 0.19)
   const leftBase = add(base, scale(normal, neck))
   const rightBase = add(base, scale(normal, -neck))
-  const leftWing = add(subtract(tip, scale(tangent, length * 0.7)), scale(normal, width))
-  const rightWing = add(subtract(tip, scale(tangent, length * 0.7)), scale(normal, -width))
+  const wingDistance = style === 'swallowtail' ? 0.62 : 0.7
+  const leftWing = add(subtract(tip, scale(tangent, length * wingDistance)), scale(normal, width))
+  const rightWing = add(subtract(tip, scale(tangent, length * wingDistance)), scale(normal, -width))
   const noseLength = Math.max(strokeWidth * 0.36, length * 0.1)
   const leftNose = add(subtract(tip, scale(tangent, noseLength)), scale(normal, noseLength * 0.56))
   const rightNose = add(subtract(tip, scale(tangent, noseLength)), scale(normal, -noseLength * 0.56))

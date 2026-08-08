@@ -10,7 +10,7 @@ import {
   transformPoint,
   type AffineTransform,
 } from '../src/core/geometry'
-import { DEFAULT_SETTINGS } from '../src/shared/types'
+import { clampSettings, DEFAULT_SETTINGS, freeSettings } from '../src/shared/types'
 
 describe('geometry transforms', () => {
   it('round-trips a point through an affine transform', () => {
@@ -81,6 +81,52 @@ describe('arrow generation', () => {
     const first = generateArrowGeometry({ x: 0, y: 0 }, { x: 500, y: 180 }, DEFAULT_SETTINGS, 42)
     const second = generateArrowGeometry({ x: 0, y: 0 }, { x: 500, y: 180 }, DEFAULT_SETTINGS, 43)
     expect(first.shaftPath).not.toBe(second.shaftPath)
+  })
+
+  it('keeps the free controls while clamping legacy settings', () => {
+    const legacy = clampSettings({ style: 'loop', color: { r: 0.4, g: 0.5, b: 0.6 } })
+    expect(legacy.style).toBe('loop')
+    expect(legacy.brush).toBe(DEFAULT_SETTINGS.brush)
+    expect(legacy.headStyle).toBe(DEFAULT_SETTINGS.headStyle)
+    expect(legacy.color).toEqual({ r: 0.4, g: 0.5, b: 0.6 })
+
+    const free = freeSettings({ style: 'spiral', brush: 'ink', headStyle: 'chunky', reversed: true })
+    expect(free.style).toBe('natural')
+    expect(free.brush).toBe('marker')
+    expect(free.headStyle).toBe('rounded')
+    expect(free.reversed).toBe(true)
+  })
+
+  it('generates every advanced path deterministically', () => {
+    const styles = ['s-curve', 'spiral', 'wave', 'emphasis'] as const
+    for (const style of styles) {
+      const settings = { ...DEFAULT_SETTINGS, style, curvature: 0.58, roughness: 0.42 }
+      const first = generateArrowGeometry({ x: 0, y: 0 }, { x: 640, y: 280 }, settings, 77)
+      const second = generateArrowGeometry({ x: 0, y: 0 }, { x: 640, y: 280 }, settings, 77)
+      expect(first.shaftPaths.length).toBeGreaterThan(0)
+      expect(first.shaftPath).toBe(second.shaftPath)
+      expect(first.headPath).toBe(second.headPath)
+      expect(first.shaftPath).not.toContain('NaN')
+      expect(first.headPath).not.toContain('NaN')
+      if (style === 'emphasis') expect(first.accentPaths).toHaveLength(2)
+    }
+  })
+
+  it('keeps brush and head variants editable as independent paths', () => {
+    const base = generateArrowGeometry({ x: 0, y: 0 }, { x: 520, y: 160 }, DEFAULT_SETTINGS, 11)
+    const highlighter = generateArrowGeometry({ x: 0, y: 0 }, { x: 520, y: 160 }, {
+      ...DEFAULT_SETTINGS,
+      brush: 'highlighter',
+    }, 11)
+    const open = generateArrowGeometry({ x: 0, y: 0 }, { x: 520, y: 160 }, {
+      ...DEFAULT_SETTINGS,
+      headStyle: 'open',
+    }, 11)
+    expect(base.headPaths).toHaveLength(1)
+    expect(open.headPaths).toHaveLength(2)
+    expect(highlighter.shaftOpacity).toBeLessThan(1)
+    expect(highlighter.headOpacity).toBeLessThan(1)
+    expect(open.headPaths.every((path) => path.endsWith('Z'))).toBe(true)
   })
 
   it('reverses the same loop gesture instead of regenerating its shape', () => {
@@ -205,6 +251,19 @@ describe('arrow generation', () => {
     })
     expect(Math.max(...approachChanges)).toBeLessThan(0.1)
     expect(Math.abs(approachHeadings[approachHeadings.length - 1] - approachHeadings[0])).toBeGreaterThan(0.5)
+  })
+
+  it('applies repeatable hand-drawn variation to the loop without moving its crossing', () => {
+    const baseSettings = { ...DEFAULT_SETTINGS, style: 'loop' as const, roughness: 0 }
+    const roughSettings = { ...baseSettings, roughness: 0.82 }
+    const base = generateArrowGeometry({ x: 0, y: 0 }, { x: 760, y: 310 }, baseSettings, 81)
+    const rough = generateArrowGeometry({ x: 0, y: 0 }, { x: 760, y: 310 }, roughSettings, 81)
+    const repeat = generateArrowGeometry({ x: 0, y: 0 }, { x: 760, y: 310 }, roughSettings, 81)
+    expect(rough.points).toEqual(repeat.points)
+    expect(rough.shaftPath).not.toBe(base.shaftPath)
+    expect(rough.crossing!.point).toEqual(rough.points[rough.crossing!.firstVisitIndex])
+    expect(rough.crossing!.point).toEqual(rough.points[rough.crossing!.secondVisitIndex])
+    expect(rough.shaftSegments.every((segment) => !polylineHasSelfIntersection(segment))).toBe(true)
   })
 
   it('keeps loop segments non-self-intersecting across directions and sides', () => {

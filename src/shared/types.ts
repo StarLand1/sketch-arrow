@@ -1,8 +1,29 @@
 export type Locale = 'zh-CN' | 'en'
-export type ArrowStyle = 'natural' | 'loop' | 's-curve' | 'spiral' | 'wave' | 'emphasis'
-export type BrushStyle = 'marker' | 'ink' | 'pencil' | 'highlighter'
-export type ArrowHeadStyle = 'rounded' | 'open' | 'chunky' | 'swallowtail'
+export type ArrowStyle = 'natural' | 'loop' | 's-curve' | 'wave'
+/** Retired V5 path values accepted only while reading old local data. */
+export type LegacyArrowStyle = ArrowStyle | 'spiral' | 'emphasis'
+export type ArrowHeadStyle = 'solid' | 'hollow' | 'path'
+export type StrokePattern = 'solid' | 'dashed' | 'dotted'
+export type LineStyle = 'clean' | 'sketch' | 'double-drawn'
+export type HeadSize = 'small' | 'medium' | 'large'
 export type SourceMode = 'line' | 'two-nodes'
+
+/** The three user-facing widths are intentionally stable document values. */
+export const STROKE_WIDTHS = {
+  thin: 5,
+  medium: 8,
+  thick: 12,
+} as const
+
+/** Medium is deliberately 120% of the V4 default head size. */
+export const HEAD_SIZE_SCALES: Record<HeadSize, number> = {
+  small: 1,
+  medium: 1.2,
+  large: 1.5,
+}
+
+export type StrokeWidthPreset = keyof typeof STROKE_WIDTHS
+export const STROKE_WIDTH_VALUES = Object.values(STROKE_WIDTHS) as number[]
 
 export interface RgbColor {
   r: number
@@ -10,16 +31,35 @@ export interface RgbColor {
   b: number
 }
 
+/** V5 exposes only deliberate, discrete choices—no continuous style sliders. */
 export interface ArrowSettings {
   style: ArrowStyle
-  brush: BrushStyle
+  lineStyle: LineStyle
   headStyle: ArrowHeadStyle
+  strokePattern: StrokePattern
   color: RgbColor
   strokeWidth: number
-  headScale: number
-  curvature: number
-  roughness: number
+  headSize: HeadSize
   reversed: boolean
+}
+
+/** Serialized V1–V4 settings accepted by the in-memory migration. */
+export interface LegacyArrowSettings {
+  style?: LegacyArrowStyle
+  brush?: 'marker' | 'ink' | 'pencil' | 'highlighter'
+  headStyle?: ArrowHeadStyle | 'open'
+  strokePattern?: StrokePattern
+  color?: Partial<RgbColor>
+  strokeWidth?: number
+  headScale?: number
+  curvature?: number
+  roughness?: number
+  reversed?: boolean
+}
+
+export interface ArrowSettingsInput extends LegacyArrowSettings {
+  lineStyle?: LineStyle
+  headSize?: HeadSize
 }
 
 export interface ArrowMetadataV1 {
@@ -27,7 +67,7 @@ export interface ArrowMetadataV1 {
   sourceMode: SourceMode
   sourceNodeIds: string[]
   seed: number
-  settings: ArrowSettings
+  settings: LegacyArrowSettings
 }
 
 export interface LoopRendering {
@@ -40,16 +80,30 @@ export interface ArrowMetadataV2 {
   sourceMode: SourceMode
   sourceNodeIds: string[]
   seed: number
-  settings: ArrowSettings
+  settings: LegacyArrowSettings
   loopRendering: LoopRendering
 }
 
-export interface ArrowMetadataV3 extends Omit<ArrowMetadataV2, 'version' | 'settings'> {
+export interface ArrowMetadataV3 extends Omit<ArrowMetadataV2, 'version'> {
   version: 3
-  settings: ArrowSettings
 }
 
-export type ArrowMetadata = ArrowMetadataV1 | ArrowMetadataV2 | ArrowMetadataV3
+export interface ArrowMetadataV4 extends Omit<ArrowMetadataV2, 'version'> {
+  version: 4
+}
+
+export interface ArrowMetadataV5 {
+  version: 5
+  sourceMode: SourceMode
+  sourceNodeIds: string[]
+  seed: number
+  settings: ArrowSettings
+  /** Internal authored side retained when a V1–V4 arrow is migrated. */
+  bend: -1 | 1
+  loopRendering: LoopRendering
+}
+
+export type ArrowMetadata = ArrowMetadataV1 | ArrowMetadataV2 | ArrowMetadataV3 | ArrowMetadataV4 | ArrowMetadataV5
 
 export interface UserPreset {
   id: string
@@ -86,25 +140,25 @@ export interface SelectionSnapshot {
   title: string
   detail: string
   nodeNames: string[]
-  metadata?: ArrowMetadata
+  metadata?: ArrowMetadataV5
 }
 
 export const DEFAULT_SETTINGS: ArrowSettings = {
   style: 'natural',
-  brush: 'marker',
-  headStyle: 'rounded',
+  lineStyle: 'clean',
+  headStyle: 'solid',
+  strokePattern: 'solid',
   color: { r: 0.13, g: 0.13, b: 0.14 },
-  strokeWidth: 8,
-  headScale: 1,
-  curvature: 0.28,
-  roughness: 0.34,
+  strokeWidth: STROKE_WIDTHS.medium,
+  headSize: 'medium',
   reversed: false,
 }
 
+export type ApplySettingsAction = 'normal' | 'rerandomize'
+
 export type UiToPluginMessage =
   | { type: 'ui-ready'; locale: Locale }
-  | { type: 'generate'; settings: ArrowSettings }
-  | { type: 'update'; settings: ArrowSettings }
+  | { type: 'apply-settings'; settings: ArrowSettings; action?: ApplySettingsAction }
   | { type: 'save-preferences'; preferences: UserPreferences }
   | { type: 'checkout' }
 
@@ -132,54 +186,82 @@ export type PluginToUiMessage =
         | 'unexpected'
     }
 
-export function clampSettings(input: Partial<ArrowSettings> | undefined): ArrowSettings {
+export function clampSettings(input: ArrowSettingsInput | undefined): ArrowSettings {
   const source = input ?? {}
   return {
     style: isArrowStyle(source.style) ? source.style : DEFAULT_SETTINGS.style,
-    brush: isBrushStyle(source.brush) ? source.brush : DEFAULT_SETTINGS.brush,
-    headStyle: isArrowHeadStyle(source.headStyle) ? source.headStyle : DEFAULT_SETTINGS.headStyle,
+    lineStyle: normalizeLineStyle(source),
+    headStyle: normalizeHeadStyle(source.headStyle),
+    strokePattern: isStrokePattern(source.strokePattern) ? source.strokePattern : DEFAULT_SETTINGS.strokePattern,
     color: {
-      // V1/V2 metadata did not have to be complete at runtime. Preserve the
-      // current default when an older record is missing a channel instead of
-      // silently turning it black.
       r: clamp(source.color?.r, 0, 1, DEFAULT_SETTINGS.color.r),
       g: clamp(source.color?.g, 0, 1, DEFAULT_SETTINGS.color.g),
       b: clamp(source.color?.b, 0, 1, DEFAULT_SETTINGS.color.b),
     },
-    strokeWidth: clamp(source.strokeWidth, 1, 40, DEFAULT_SETTINGS.strokeWidth),
-    headScale: clamp(source.headScale, 0.55, 2, DEFAULT_SETTINGS.headScale),
-    curvature: clamp(source.curvature, -1, 1, DEFAULT_SETTINGS.curvature),
-    roughness: clamp(source.roughness, 0, 1, DEFAULT_SETTINGS.roughness),
+    strokeWidth: nearestStrokeWidth(source.strokeWidth),
+    headSize: normalizeHeadSize(source),
     reversed: Boolean(source.reversed),
   }
 }
 
-export function freeSettings(input: Partial<ArrowSettings> | undefined): ArrowSettings {
+export function freeSettings(input: ArrowSettingsInput | undefined): ArrowSettings {
   const settings = clampSettings(input)
   return {
     ...settings,
     style: settings.style === 'loop' ? 'loop' : 'natural',
-    brush: 'marker',
-    headStyle: 'rounded',
-    headScale: DEFAULT_SETTINGS.headScale,
-    curvature: DEFAULT_SETTINGS.curvature,
-    roughness: DEFAULT_SETTINGS.roughness,
+    lineStyle: 'clean',
+    headStyle: 'solid',
+    strokePattern: 'solid',
+    headSize: 'medium',
   }
+}
+
+export function headScaleForSize(size: HeadSize): number {
+  return HEAD_SIZE_SCALES[size]
 }
 
 function clamp(value: number | undefined, min: number, max: number, fallback = min): number {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value! : fallback))
 }
 
+export function nearestStrokeWidth(value: number | undefined): number {
+  const candidate = Number.isFinite(value) ? value! : DEFAULT_SETTINGS.strokeWidth
+  return STROKE_WIDTH_VALUES.reduce((nearest, current) => {
+    return Math.abs(current - candidate) < Math.abs(nearest - candidate) ? current : nearest
+  }, DEFAULT_SETTINGS.strokeWidth)
+}
+
+function normalizeHeadSize(source: ArrowSettingsInput): HeadSize {
+  if (source.headSize === 'small' || source.headSize === 'medium' || source.headSize === 'large') {
+    return source.headSize
+  }
+  if (Number.isFinite(source.headScale)) {
+    const scale = source.headScale!
+    if (scale < 1.1) return 'small'
+    if (scale < 1.35) return 'medium'
+    return 'large'
+  }
+  return DEFAULT_SETTINGS.headSize
+}
+
+function normalizeLineStyle(source: ArrowSettingsInput): LineStyle {
+  if (source.lineStyle === 'clean' || source.lineStyle === 'sketch' || source.lineStyle === 'double-drawn') {
+    return source.lineStyle
+  }
+  if (source.brush === 'pencil' || (source.roughness ?? 0) >= 0.62) return 'sketch'
+  return DEFAULT_SETTINGS.lineStyle
+}
+
 function isArrowStyle(value: unknown): value is ArrowStyle {
-  return value === 'natural' || value === 'loop' || value === 's-curve'
-    || value === 'spiral' || value === 'wave' || value === 'emphasis'
+  return value === 'natural' || value === 'loop' || value === 's-curve' || value === 'wave'
 }
 
-function isBrushStyle(value: unknown): value is BrushStyle {
-  return value === 'marker' || value === 'ink' || value === 'pencil' || value === 'highlighter'
+function normalizeHeadStyle(value: unknown): ArrowHeadStyle {
+  if (value === 'solid' || value === 'hollow' || value === 'path') return value
+  if (value === 'open') return 'path'
+  return 'solid'
 }
 
-function isArrowHeadStyle(value: unknown): value is ArrowHeadStyle {
-  return value === 'rounded' || value === 'open' || value === 'chunky' || value === 'swallowtail'
+function isStrokePattern(value: unknown): value is StrokePattern {
+  return value === 'solid' || value === 'dashed' || value === 'dotted'
 }

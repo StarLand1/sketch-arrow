@@ -8,9 +8,10 @@ export type Feature =
   | 'natural-style'
   | 'loop-style'
   | 'advanced-styles'
-  | 'pro-parameters'
-  | 'brush-styles'
-  | 'head-styles'
+  | 'head-sizes'
+  | 'line-styles'
+  | 'head-variants'
+  | 'stroke-patterns'
   | 'presets'
   | 'brand-colors'
 

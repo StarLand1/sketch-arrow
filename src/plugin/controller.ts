@@ -14,8 +14,9 @@ import {
   clampSettings,
   DEFAULT_SETTINGS,
   freeSettings,
-  type ArrowMetadataV3,
+  type ArrowMetadataV5,
   type ArrowSettings,
+  type ArrowSettingsInput,
   type BrandColor,
   type Locale,
   type PluginToUiMessage,
@@ -28,7 +29,8 @@ import {
 
 const METADATA_KEY = 'sketch-arrow:metadata'
 const ROLE_KEY = 'sketch-arrow:role'
-const PREFERENCES_KEY = 'sketch-arrow:preferences-v2'
+const PREFERENCES_KEY = 'sketch-arrow:preferences-v3'
+const V2_PREFERENCES_KEY = 'sketch-arrow:preferences-v2'
 const LEGACY_PREFERENCES_KEY = 'sketch-arrow:preferences-v1'
 const IDENTITY: AffineTransform = [[1, 0, 0], [0, 1, 0]]
 
@@ -82,14 +84,18 @@ figma.ui.onmessage = async (message: UiToPluginMessage) => {
       await savePreferences(message.preferences)
       return
     }
-    if (message.type === 'generate') {
-      await generateFromSelection(await settingsForNewArrow(message.settings))
-      sendToUi({ type: 'operation-result', ok: true, code: 'generated' })
-      return
-    }
-    if (message.type === 'update') {
-      await updateSelectedArrow(clampSettings(message.settings))
-      sendToUi({ type: 'operation-result', ok: true, code: 'updated' })
+    if (message.type === 'apply-settings') {
+      const selectedArrow = findSelectedArrowGroup()
+      if (selectedArrow) {
+        await updateSelectedArrow(
+          clampSettings(message.settings),
+          message.action === 'rerandomize',
+        )
+        sendToUi({ type: 'operation-result', ok: true, code: 'updated' })
+      } else {
+        await generateFromSelection(await settingsForNewArrow(message.settings))
+        sendToUi({ type: 'operation-result', ok: true, code: 'generated' })
+      }
     }
   } catch (error) {
     const operationError = normalizeError(error)
@@ -116,6 +122,10 @@ function settingsForExistingUpdate(
   return {
     ...previous,
     style: isFreeStyle(requested.style) ? requested.style : previous.style,
+    lineStyle: requested.lineStyle === 'clean' ? 'clean' : previous.lineStyle,
+    headStyle: requested.headStyle === 'solid' ? 'solid' : previous.headStyle,
+    strokePattern: requested.strokePattern === 'solid' ? 'solid' : previous.strokePattern,
+    headSize: requested.headSize === 'medium' ? 'medium' : previous.headSize,
     color: requested.color,
     strokeWidth: requested.strokeWidth,
     reversed: requested.reversed,
@@ -148,12 +158,13 @@ async function generateFromLine(line: LineNode, settings: ArrowSettings): Promis
   const target = findSafeContainerForNode(line)
   const [start, end] = lineEndpoints(line.width, asAffine(line.absoluteTransform))
   const seed = createSeed()
-  const metadata: ArrowMetadataV3 = {
-    version: 3,
+  const metadata: ArrowMetadataV5 = {
+    version: 5,
     sourceMode: 'line',
     sourceNodeIds: [line.id],
     seed,
     settings,
+    bend: 1,
     loopRendering: { crossingStyle: 'knot', overpass: 'tail' },
   }
   const group = createArrowGroup(target, start, end, metadata, line)
@@ -168,19 +179,20 @@ async function generateFromTwoNodes(
   const connection = connectionForNodes(first, second, settings.strokeWidth)
   const target = findCommonSafeContainer(first, second)
   const seed = createSeed()
-  const metadata: ArrowMetadataV3 = {
-    version: 3,
+  const metadata: ArrowMetadataV5 = {
+    version: 5,
     sourceMode: 'two-nodes',
     sourceNodeIds: [first.id, second.id],
     seed,
     settings,
+    bend: 1,
     loopRendering: { crossingStyle: 'knot', overpass: 'tail' },
   }
   const group = createArrowGroup(target, connection.start, connection.end, metadata)
   selectAndReveal(group)
 }
 
-async function updateSelectedArrow(settings: ArrowSettings): Promise<void> {
+async function updateSelectedArrow(settings: ArrowSettings, rerandomize = false): Promise<void> {
   const group = findSelectedArrowGroup()
   if (!group) throw new PluginOperationError('invalid-selection', 'Select a generated Sketch Arrow group.')
   const existing = readMetadata(group)
@@ -211,10 +223,10 @@ async function updateSelectedArrow(settings: ArrowSettings): Promise<void> {
     end = connection.end
   }
 
-  const metadata: ArrowMetadataV3 = {
+  const metadata: ArrowMetadataV5 = {
     ...existing,
-    version: 3,
-    seed: existing.seed,
+    version: 5,
+    seed: rerandomize ? createSeed() : existing.seed,
     settings: effectiveSettings,
     loopRendering: { crossingStyle: 'knot', overpass: 'tail' },
   }
@@ -233,13 +245,13 @@ function createArrowGroup(
   target: WritableContainer,
   pageStart: Point,
   pageEnd: Point,
-  metadata: ArrowMetadataV3,
+  metadata: ArrowMetadataV5,
   existingGuide?: LineNode,
 ): GroupNode {
   const targetInverse = invertTransform(containerTransform(target))
   const localStart = transformPoint(targetInverse, pageStart)
   const localEnd = transformPoint(targetInverse, pageEnd)
-  const geometry = generateArrowGeometry(localStart, localEnd, metadata.settings, metadata.seed)
+  const geometry = generateArrowGeometry(localStart, localEnd, metadata.settings, metadata.seed, metadata.bend)
   const shafts = geometry.shaftPaths.map((path, index) => createVectorNode(
     target,
     path,
@@ -248,24 +260,18 @@ function createArrowGroup(
     geometry.shaftOpacity,
     geometry.shaftPaths.length === 1
       ? 'Arrow shaft'
-      : index === geometry.shaftPaths.length - 1
+      : geometry.shaftLayerBreakIndex !== undefined && index >= geometry.shaftLayerBreakIndex
         ? 'Arrow shaft (overpass)'
         : 'Arrow shaft (underpass)',
   ))
-  const accents = geometry.accentPaths.map((path) => createVectorNode(
-    target,
-    path,
-    metadata.settings,
-    'accent',
-    geometry.shaftOpacity,
-    'Arrow emphasis mark',
-  ))
-  const heads = geometry.headPaths.map((path) => createVectorNode(
+  const heads = geometry.headPaths.map((path, index) => createVectorNode(
     target,
     path,
     metadata.settings,
     'head',
     geometry.headOpacity,
+    undefined,
+    geometry.headWindingRules[index],
   ))
 
   const guide = existingGuide ?? createGuideLine(target, pageStart, pageEnd)
@@ -274,7 +280,7 @@ function createArrowGroup(
   guide.name = 'Arrow guide (hidden)'
   guide.setPluginData(ROLE_KEY, 'guide')
 
-  const group = figma.group([guide, ...shafts, ...accents, ...heads], target)
+  const group = figma.group([guide, ...shafts, ...heads], target)
   group.name = 'Sketch Arrow'
   group.setPluginData(METADATA_KEY, JSON.stringify(metadata))
   if (target.type === 'FRAME' && target.layoutMode !== 'NONE') {
@@ -287,14 +293,15 @@ function createVectorNode(
   target: WritableContainer,
   path: string,
   settings: ArrowSettings,
-  role: 'shaft' | 'head' | 'accent',
+  role: 'shaft' | 'head',
   opacity = 1,
   name?: string,
+  windingRule: 'NONZERO' | 'EVENODD' = 'NONZERO',
 ): VectorNode {
   const vector = figma.createVector()
   target.appendChild(vector)
-  vector.name = name ?? (role === 'shaft' ? 'Arrow shaft' : role === 'head' ? 'Arrow head' : 'Arrow accent')
-  vector.vectorPaths = [{ windingRule: 'NONZERO', data: path }]
+  vector.name = name ?? (role === 'shaft' ? 'Arrow shaft' : 'Arrow head')
+  vector.vectorPaths = [{ windingRule, data: path }]
   vector.fills = [{ type: 'SOLID', color: settings.color }]
   vector.opacity = opacity
   vector.strokes = []
@@ -385,14 +392,21 @@ function findSelectedArrowGroup(): GroupNode | null {
   return null
 }
 
-function readMetadata(node: BaseNode): ArrowMetadataV3 | null {
+function readMetadata(node: BaseNode): ArrowMetadataV5 | null {
   const raw = node.getPluginData(METADATA_KEY)
   if (!raw) return null
   try {
-    const parsed = JSON.parse(raw) as Partial<Omit<ArrowMetadataV3, 'version'>> & { version?: number }
+    const parsed = JSON.parse(raw) as {
+      version?: number
+      sourceMode?: unknown
+      sourceNodeIds?: unknown
+      seed?: unknown
+      settings?: unknown
+      bend?: unknown
+    }
     if (
-      (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3)
-      || !parsed.settings
+      (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4 && parsed.version !== 5)
+      || !isRecord(parsed.settings)
       || (parsed.sourceMode !== 'line' && parsed.sourceMode !== 'two-nodes')
       || !Array.isArray(parsed.sourceNodeIds)
     ) {
@@ -404,12 +418,15 @@ function readMetadata(node: BaseNode): ArrowMetadataV3 | null {
       return null
     }
     return {
-      // Reading V1/V2 migrates it in memory. The next update stores V3 data.
-      version: 3,
+      // Reading V1–V4 migrates it in memory. The next update stores V5 data.
+      version: 5,
       sourceMode: parsed.sourceMode,
       sourceNodeIds,
-      seed: Number.isFinite(parsed.seed) ? parsed.seed! : 1,
-      settings: clampSettings(parsed.settings as Partial<ArrowSettings>),
+      seed: Number.isFinite(parsed.seed) ? Number(parsed.seed) : 1,
+      settings: clampSettings(parsed.settings as ArrowSettingsInput),
+      bend: parsed.version === 5
+        ? parsed.bend === -1 ? -1 : 1
+        : typeof parsed.settings.curvature === 'number' && parsed.settings.curvature < 0 ? -1 : 1,
       loopRendering: { crossingStyle: 'knot', overpass: 'tail' },
     }
   } catch {
@@ -492,6 +509,7 @@ function selectAndReveal(group: GroupNode): void {
 
 async function loadPreferences(fallbackLocale: Locale): Promise<UserPreferences> {
   const stored = (await figma.clientStorage.getAsync(PREFERENCES_KEY)
+    ?? await figma.clientStorage.getAsync(V2_PREFERENCES_KEY)
     ?? await figma.clientStorage.getAsync(LEGACY_PREFERENCES_KEY)) as Partial<UserPreferences> | undefined
   return {
     locale: stored?.locale === 'en' || stored?.locale === 'zh-CN' ? stored.locale : fallbackLocale,

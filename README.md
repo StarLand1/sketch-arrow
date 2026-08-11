@@ -5,14 +5,17 @@ Sketch Arrow is a local-first Figma Design plugin that generates editable, hand-
 ## Free and Pro features
 
 - Free: generate from one Figma `LineNode` or two layers, choose Natural or
-  Hand-drawn loop, edit color and stroke width, and reverse direction.
-- Pro: adjust head size, curve direction, and hand-drawn feel; choose Ink,
-  Pencil, or Highlighter brushes; choose additional head styles; and use
-  S-curve, Spiral, Wave, or Emphasis paths.
+  Hand-drawn loop, choose Thin/Medium/Bold widths, use common or custom colors,
+  use the 120% Medium solid head and clean solid line, reverse direction, and
+  rerandomize the saved gesture.
+- Pro: choose Small or Large heads, Hollow or Path heads, dashed or dotted
+  patterns, Sketch or Double-drawn line character, and S-curve or Wave paths.
 - Pro also includes local presets and brand-color swatches. These values stay
   in Figma `clientStorage` and are never uploaded.
 - Every generated arrow is deterministic for its saved seed and remains
-  editable as separate guide, shaft, accent, and head VectorNodes.
+  editable as separate guide, shaft, and head VectorNodes. Dashed and
+  dotted lines are arc-length-split filled vectors, not renderer-dependent
+  stroke dash patterns.
 - Bilingual Chinese/English UI with light and dark theme support.
 - Figma Payments is used for Pro entitlement when the published plugin is
   eligible. No account system, analytics, backend, or external network calls
@@ -49,23 +52,24 @@ This runs TypeScript validation, geometry unit tests, and a minified production 
 
 1. Press `L` in Figma and draw a line from the desired start to end.
 2. Select the line and run Sketch Arrow.
-3. Adjust the controls and click **Generate arrow**.
+3. Click any path, color, width, size, line, or head setting. The arrow is
+   generated immediately with the complete current combination.
 
 The original line becomes a hidden guide inside the generated group. Expand the group and reveal the guide if you want to inspect it.
 
 ### Between two layers
 
 1. Select exactly two layers.
-2. Run Sketch Arrow and click **Generate arrow**.
+2. Run Sketch Arrow and click any setting to generate the connection.
 
 The plugin connects the facing boundaries. If the layers overlap or are too close, use a Line guide instead.
 
 ### Update an arrow
 
-Select the `Sketch Arrow` group, change controls, then click **Update arrow**.
-Updates keep the saved hand-drawn seed, so the shape does not unexpectedly
-change while you tune a free control. The original source Line or source layer
-IDs are retained for future updates; if a source is deleted, the current arrow
+Select the `Sketch Arrow` group and click any setting. The selected arrow is
+updated in place instead of creating a duplicate. Updates keep the saved seed;
+only **Rerandomize** replaces it. The original source Line or source layer IDs
+are retained for future updates; if a source is deleted, the current arrow
 remains editable but cannot be regenerated from that source.
 
 ## Architecture
@@ -102,8 +106,14 @@ geometry and document model do not depend on a server or user account.
 - Two layers arranged horizontally, vertically, diagonally, rotated, and in Auto Layout.
 - Layers in the same poster Frame and layers across top-level Frames.
 - Move or delete source layers, then update.
-- Natural/Loop, all Pro paths, brush/head variants, curvature extremes,
-  roughness extremes, and head-size extremes (in a paid test environment).
+- Natural/Loop, S-curve/Wave Pro paths, three line characters, three head styles,
+  solid/dashed/dotted patterns, three widths, common/custom colors, and three
+  head sizes (in a paid test environment).
+- Confirm the default Medium head is 120% of the old default, Hollow has even
+  wall thickness, dash gaps are about 70% of a dash, and Double-drawn creates
+  two visibly distinct but related passes.
+- Confirm the first setting click creates an arrow and later setting clicks
+  update that selected arrow without duplicates.
 - Light/dark themes and Chinese/English UI.
 - Reopen the plugin and confirm the last settings persist.
 
@@ -111,6 +121,6 @@ geometry and document model do not depend on a server or user account.
 
 - Figma Design only.
 - Arbitrary custom Pen/Pencil path import is planned for a later release;
-  the built-in advanced path templates are available in Pro.
+  the built-in S-curve and Wave templates are available in Pro.
 - Arrows do not update in the background; Figma plugins cannot stay running after they are closed.
 - Two-layer connection uses oriented rectangular bounds for predictable performance.

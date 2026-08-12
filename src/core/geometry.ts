@@ -236,7 +236,10 @@ export function generateArrowGeometry(
 
   const endTangent = tangentAtEnd(roughened)
   const headScale = headScaleForSize(settings.headSize)
-  const headGeometryScale = settings.headStyle === 'path' ? 1 : CLOSED_HEAD_GEOMETRY_SCALE
+  // Rough path heads lose a little apparent area to their pressure profile;
+  // compensate so all head styles keep the same visual footprint.
+  const pathHeadScale = settings.lineStyle === 'clean' ? 1 : 1.08
+  const headGeometryScale = settings.headStyle === 'path' ? pathHeadScale : CLOSED_HEAD_GEOMETRY_SCALE
   const headLength = clamp(
     settings.strokeWidth * headScale * 5.325 * headGeometryScale,
     settings.strokeWidth * 3.675 * headGeometryScale,

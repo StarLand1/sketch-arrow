@@ -8,18 +8,19 @@ export type LineStyle = 'clean' | 'sketch' | 'double-drawn'
 export type HeadSize = 'small' | 'medium' | 'large'
 export type SourceMode = 'line' | 'two-nodes'
 
-/** The three user-facing widths are intentionally stable document values. */
+/** The three user-facing widths are intentionally stable document values.
+ * They are 70% of the previous 5 / 8 / 12 px presets. */
 export const STROKE_WIDTHS = {
-  thin: 5,
-  medium: 8,
-  thick: 12,
+  thin: 3.5,
+  medium: 5.6,
+  thick: 8.4,
 } as const
 
-/** Medium is deliberately 120% of the V4 default head size. */
+/** Stable user-facing head-size scales, kept in ascending order. */
 export const HEAD_SIZE_SCALES: Record<HeadSize, number> = {
-  small: 1,
-  medium: 1.2,
-  large: 1.5,
+  small: 1.4,
+  medium: 1.55,
+  large: 1.7,
 }
 
 export type StrokeWidthPreset = keyof typeof STROKE_WIDTHS
@@ -98,6 +99,8 @@ export interface ArrowMetadataV5 {
   sourceNodeIds: string[]
   seed: number
   settings: ArrowSettings
+  /** True once this arrow has first used a Pro trial capability. */
+  proTrialClaimed: boolean
   /** Internal authored side retained when a V1–V4 arrow is migrated. */
   bend: -1 | 1
   loopRendering: LoopRendering
@@ -113,24 +116,19 @@ export interface UserPreset {
   updatedAt: number
 }
 
-export interface BrandColor {
-  id: string
-  name: string
-  color: RgbColor
-}
-
 export type PaymentStatus = 'PAID' | 'UNPAID' | 'NOT_SUPPORTED'
 
 export interface EntitlementSnapshot {
   tier: 'free' | 'pro'
   paymentStatus: PaymentStatus
+  /** Remaining Pro arrow slots for an unpaid user. */
+  trialRemaining: number
 }
 
 export interface UserPreferences {
   locale: Locale
   settings: ArrowSettings
   presets: UserPreset[]
-  brandColors: BrandColor[]
 }
 
 export type SelectionKind = 'line' | 'two-nodes' | 'generated-arrow' | 'invalid'
@@ -212,7 +210,6 @@ export function freeSettings(input: ArrowSettingsInput | undefined): ArrowSettin
     lineStyle: 'clean',
     headStyle: 'solid',
     strokePattern: 'solid',
-    headSize: 'medium',
   }
 }
 

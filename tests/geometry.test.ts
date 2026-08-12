@@ -110,14 +110,16 @@ describe('arrow generation', () => {
     expect(free.lineStyle).toBe('clean')
     expect(free.headStyle).toBe('solid')
     expect(free.strokePattern).toBe('solid')
-    expect(free.headSize).toBe('medium')
+    expect(free.headSize).toBe('large')
     expect(free.reversed).toBe(true)
     expect(clampSettings({ style: 'emphasis' }).style).toBe('natural')
+    expect(freeSettings({ headSize: 'small' }).headSize).toBe('small')
   })
 
   it('normalizes line widths to the three stable presets', () => {
+    expect(STROKE_WIDTHS).toEqual({ thin: 3.5, medium: 5.6, thick: 8.4 })
     expect(clampSettings({ strokeWidth: 1 }).strokeWidth).toBe(STROKE_WIDTHS.thin)
-    expect(clampSettings({ strokeWidth: 10 }).strokeWidth).toBe(STROKE_WIDTHS.medium)
+    expect(clampSettings({ strokeWidth: 6 }).strokeWidth).toBe(STROKE_WIDTHS.medium)
     expect(clampSettings({ strokeWidth: 40 }).strokeWidth).toBe(STROKE_WIDTHS.thick)
     expect(DEFAULT_SETTINGS.strokeWidth).toBe(STROKE_WIDTHS.medium)
   })
@@ -240,7 +242,7 @@ describe('arrow generation', () => {
     )
   })
 
-  it('uses 100%, 120%, and 150% for the three stable head sizes', () => {
+  it('uses the adjusted small, medium, and large head-size scales', () => {
     const sizes = ['small', 'medium', 'large'] as const
     const lengths = sizes.map((headSize) => generateArrowGeometry(
       { x: 0, y: 0 },
@@ -248,8 +250,13 @@ describe('arrow generation', () => {
       { ...DEFAULT_SETTINGS, headSize },
       5,
     ).headLength)
-    expect(lengths[1] / lengths[0]).toBeCloseTo(1.2)
-    expect(lengths[2] / lengths[0]).toBeCloseTo(1.5)
+    expect(lengths[1] / lengths[0]).toBeCloseTo(1.55 / 1.4)
+    expect(lengths[2] / lengths[0]).toBeCloseTo(1.7 / 1.4)
+    expect(headScaleForSize('small')).toBeCloseTo(1.4)
+    expect(headScaleForSize('medium')).toBeCloseTo(1.55)
+    expect(headScaleForSize('large')).toBeCloseTo(1.7)
+    expect(headScaleForSize('small')).toBeLessThan(headScaleForSize('medium'))
+    expect(headScaleForSize('medium')).toBeLessThan(headScaleForSize('large'))
     expect(DEFAULT_SETTINGS.headSize).toBe('medium')
   })
 

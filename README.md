@@ -4,14 +4,20 @@ Sketch Arrow is a local-first Figma Design plugin that generates editable, hand-
 
 ## Free and Pro features
 
-- Free: generate from one Figma `LineNode` or two layers, choose Natural or
-  Hand-drawn loop, choose Thin/Medium/Bold widths, use common or custom colors,
-  use the 120% Medium solid head and clean solid line, reverse direction, and
-  rerandomize the saved gesture.
-- Pro: choose Small or Large heads, Hollow or Path heads, dashed or dotted
-  patterns, Sketch or Double-drawn line character, and S-curve or Wave paths.
-- Pro also includes local presets and brand-color swatches. These values stay
-  in Figma `clientStorage` and are never uploaded.
+- Free: generate from one Figma `LineNode`, choose Natural or Hand-drawn loop,
+  choose Thin/Medium/Bold widths and Small/Medium/Large solid heads, use common
+  or custom colors, reverse direction, and rerandomize the saved gesture.
+- Pro: automatically connect two selected layers, choose Hollow or Path heads,
+  dashed or dotted patterns, Sketch or Double-drawn line character, and S-curve
+  or Wave paths.
+- Before purchase, an unpaid user receives five Pro arrow slots. A slot is
+  claimed only when an arrow first uses a Pro capability; continued edits to
+  that same trial arrow do not consume another slot.
+- Pro is designed as a one-time purchase. Configure the actual price and
+  one-time payment model in the Figma Community publishing flow.
+- Pro also includes a local preset library. Presets save the complete visual
+  combination, including path color, and stay in Figma `clientStorage`; they
+  are never uploaded.
 - Every generated arrow is deterministic for its saved seed and remains
   editable as separate guide, shaft, and head VectorNodes. Dashed and
   dotted lines are arc-length-split filled vectors, not renderer-dependent
@@ -57,10 +63,27 @@ This runs TypeScript validation, geometry unit tests, and a minified production 
 
 The original line becomes a hidden guide inside the generated group. Expand the group and reveal the guide if you want to inspect it.
 
+### Presets
+
+1. After configuring an arrow, open the **Presets** section and choose
+   **Save current preset** beside the preset selector.
+2. Give the preset a name. Its path shape, color, width, head size, line
+   pattern, line character, and head style are stored together.
+3. Choose a saved preset from the selector to apply it to the current Line,
+   two-layer selection, or selected Sketch Arrow. Direction is intentionally
+   kept from the current selection rather than stored in the preset.
+4. Click **Manage** to expand the management panel, then use **Overwrite**,
+   **Rename**, or **Delete** on a saved preset.
+
+Preset storage is a Pro capability. Existing old-version brand-color data is
+ignored by the new UI; common colors and the custom color picker remain free.
+
 ### Between two layers
 
 1. Select exactly two layers.
-2. Run Sketch Arrow and click any setting to generate the connection.
+2. Run Sketch Arrow and click any setting to generate the connection. This is
+   a Pro capability and can use one of the five trial arrow slots before
+   purchase.
 
 The plugin connects the facing boundaries. If the layers overlap or are too close, use a Line guide instead.
 
@@ -91,7 +114,8 @@ Before publishing to Figma Community:
 1. Create/register the plugin in Figma and replace the placeholder `manifest.json` ID (`000000000000000000`) with the assigned numeric Plugin ID.
 2. Confirm the final product name and support contact.
 3. Prepare the icon, cover, screenshots, Community description, and privacy disclosure.
-4. Confirm the commercial terms and Pro feature list.
+4. Configure a one-time payment price, then confirm the commercial terms and
+   Pro feature list.
 5. Re-run `npm run check` and the manual scenarios below.
 
 The manifest requests the Figma `payments` permission. In a local development
@@ -108,7 +132,10 @@ geometry and document model do not depend on a server or user account.
 - Move or delete source layers, then update.
 - Natural/Loop, S-curve/Wave Pro paths, three line characters, three head styles,
   solid/dashed/dotted patterns, three widths, common/custom colors, and three
-  head sizes (in a paid test environment).
+  head sizes.
+- Five Pro trial arrow slots: the first use of a Pro capability on an arrow
+  decrements the count once; repeated updates to that same trial arrow do not
+  decrement it. Verify the sixth Pro arrow opens the purchase prompt.
 - Confirm the default Medium head is 120% of the old default, Hollow has even
   wall thickness, dash gaps are about 70% of a dash, and Double-drawn creates
   two visibly distinct but related passes.

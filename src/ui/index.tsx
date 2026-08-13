@@ -523,10 +523,9 @@ function offsetPreviewPath(style: ArrowStyle): string {
 }
 
 function StyleButton({ active, label, preview, pro = false, locked = false, onClick }: { active: boolean; label: string; preview: ArrowStyle; pro?: boolean; locked?: boolean; onClick: () => void }) {
-  return <button aria-pressed={active} className={`style-button ${active ? 'active' : ''} ${locked ? 'locked' : ''}`} onClick={onClick}>
+  return <button aria-label={label} title={label} data-tooltip={label} aria-pressed={active} className={`style-button ${active ? 'active' : ''} ${locked ? 'locked' : ''}`} onClick={onClick}>
     {pro && <span className="option-pro-tag">PRO</span>}
     <svg viewBox="0 0 112 40" aria-hidden="true"><path d={stylePreviewPath(preview)} /></svg>
-    <span>{label}</span>
   </button>
 }
 
@@ -545,9 +544,8 @@ function WidthField({ label, value, labels, onChange }: { label: string; value: 
   ] as const
   return <div className="width-field">
     <div className="field-row"><span className="control-label">{label}</span></div>
-    <div className="width-options">{options.map(([key, width]) => <button key={key} aria-pressed={value === width} className={`width-option ${value === width ? 'active' : ''}`} onClick={() => onChange(width)}>
+    <div className="width-options">{options.map(([key, width]) => <button key={key} aria-label={labels[key]} title={labels[key]} data-tooltip={labels[key]} aria-pressed={value === width} className={`width-option ${value === width ? 'active' : ''}`} onClick={() => onChange(width)}>
       <span className={`width-preview width-${key}`}><i /></span>
-      <span>{labels[key]}</span>
     </button>)}</div>
   </div>
 }
@@ -557,10 +555,9 @@ type OptionPreviewKind = 'pattern' | 'head' | 'head-size' | 'line-style'
 function OptionGrid({ values, selected, labels, lockedValues = [], proValues = [], onSelect, onUpgrade, preview }: { values: string[]; selected: string; labels: Record<string, string>; lockedValues?: string[]; proValues?: string[]; onSelect: (value: string) => void; onUpgrade: () => void; preview?: OptionPreviewKind }) {
   return <div className="option-grid option-grid-three">{values.map((value) => {
     const locked = lockedValues.includes(value)
-    return <button key={value} aria-pressed={selected === value} className={`option-button ${selected === value ? 'active' : ''} ${locked ? 'locked' : ''}`} onClick={() => locked ? onUpgrade() : onSelect(value)}>
+    return <button key={value} aria-label={labels[value]} title={labels[value]} data-tooltip={labels[value]} aria-pressed={selected === value} className={`option-button ${selected === value ? 'active' : ''} ${locked ? 'locked' : ''}`} onClick={() => locked ? onUpgrade() : onSelect(value)}>
       {proValues.includes(value) && <span className="option-pro-tag">PRO</span>}
       {preview && <OptionPreview kind={preview} value={value} />}
-      <span className="option-label">{labels[value]}</span>
     </button>
   })}</div>
 }

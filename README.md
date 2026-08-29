@@ -1,31 +1,20 @@
 # Sketch Arrow
 
-Sketch Arrow is a local-first Figma Design plugin that generates editable, hand-drawn arrows without stretching fixed assets.
+Sketch Arrow is a local-first Figma Design plugin that generates editable, hand-drawn arrows without stretching fixed assets. Version 0.2.0 is fully free: every built-in generation mode, visual style, and local preset feature is available without an account, payment, or network service.
 
-## Free and Pro features
+## Features
 
-- Free: generate from one Figma `LineNode`, choose Natural or Hand-drawn loop,
-  choose Thin/Medium/Bold widths and Small/Medium/Large solid heads, use common
-  or custom colors, reverse direction, and rerandomize the saved gesture.
-- Pro: automatically connect two selected layers, choose Hollow or Path heads,
-  dashed or dotted patterns, Sketch or Double-drawn line character, and S-curve
-  or Wave paths.
-- Before purchase, an unpaid user receives five Pro arrow slots. A slot is
-  claimed only when an arrow first uses a Pro capability; continued edits to
-  that same trial arrow do not consume another slot.
-- Pro is designed as a one-time purchase. Configure the actual price and
-  one-time payment model in the Figma Community publishing flow.
-- Pro also includes a local preset library. Presets save the complete visual
-  combination, including path color, and stay in Figma `clientStorage`; they
-  are never uploaded.
-- Every generated arrow is deterministic for its saved seed and remains
-  editable as separate guide, shaft, and head VectorNodes. Dashed and
-  dotted lines are arc-length-split filled vectors, not renderer-dependent
-  stroke dash patterns.
+- Generate from one Figma `LineNode` or automatically connect two selected layers.
+- Choose Natural, Hand-drawn loop, S-curve, or Wave paths.
+- Choose Clean, Sketch, or Double-drawn line character.
+- Choose Solid, Hollow, or Path arrow heads.
+- Choose Solid, Dashed, or Dotted stroke patterns.
+- Choose Thin, Medium, or Bold widths, three head sizes, common or custom colors, and reverse direction.
+- Save, apply, overwrite, rename, and delete local presets. Presets store the complete visual combination in Figma `clientStorage` and are never uploaded.
+- Every generated arrow is deterministic for its saved seed and remains editable as separate guide, shaft, and head VectorNodes.
+- Dashed and dotted lines are arc-length-split filled vectors, not renderer-dependent stroke dash patterns.
 - Bilingual Chinese/English UI with light and dark theme support.
-- Figma Payments is used for Pro entitlement when the published plugin is
-  eligible. No account system, analytics, backend, or external network calls
-  are used.
+- No account system, analytics, backend, payment flow, or external network calls.
 
 ## Local development
 
@@ -65,8 +54,7 @@ The original line becomes a hidden guide inside the generated group. Expand the 
 
 ### Presets
 
-1. After configuring an arrow, open the **Presets** section and choose
-   **Save current preset** beside the preset selector.
+1. After configuring an arrow, open the **Presets** section and choose **Save current preset**.
 2. Give the preset a name. Its path shape, color, width, head size, line
    pattern, line character, and head style are stored together.
 3. Choose a saved preset from the selector to apply it to the current Line,
@@ -75,15 +63,10 @@ The original line becomes a hidden guide inside the generated group. Expand the 
 4. Click **Manage** to expand the management panel, then use **Overwrite**,
    **Rename**, or **Delete** on a saved preset.
 
-Preset storage is a Pro capability. Existing old-version brand-color data is
-ignored by the new UI; common colors and the custom color picker remain free.
-
 ### Between two layers
 
 1. Select exactly two layers.
-2. Run Sketch Arrow and click any setting to generate the connection. This is
-   a Pro capability and can use one of the five trial arrow slots before
-   purchase.
+2. Run Sketch Arrow and click any setting to generate the connection.
 
 The plugin connects the facing boundaries. If the layers overlap or are too close, use a Line guide instead.
 
@@ -95,17 +78,17 @@ only **Rerandomize** replaces it. The original source Line or source layer IDs
 are retained for future updates; if a source is deleted, the current arrow
 remains editable but cannot be regenerated from that source.
 
+Arrows and presets created by the previous commercial build remain compatible. The free build keeps their stored visual settings and does not reset or downgrade them.
+
 ## Architecture
 
 - `src/core/geometry.ts`: pure geometry, transform, connection, curve, and arrowhead algorithms.
 - `src/plugin/controller.ts`: Figma selection, nodes, grouping, metadata, persistence, and error handling.
 - `src/ui/`: React iframe UI and bilingual copy.
-- `src/core/entitlements.ts`: free entitlement provider and Figma Payments
-  checkout seam.
 
 The arrow shaft uses [`perfect-freehand`](https://github.com/steveruizok/perfect-freehand) (MIT) to turn the generated centerline into a pressure-sensitive filled vector outline. This gives the stroke an intentional light-to-full transition while keeping the arrow end full and rounded, without relying on Figma's renderer-specific variable stroke support.
 
-Generated groups store versioned private plugin metadata under `sketch-arrow:metadata`. Future metadata formats should add migrations rather than rewriting existing arrows in place.
+Generated groups store versioned private plugin metadata under `sketch-arrow:metadata`. Existing V5 metadata, including the legacy commercial trial marker, remains readable for compatibility; the free build does not use that marker for authorization.
 
 ## Publishing checklist
 
@@ -114,14 +97,9 @@ Before publishing to Figma Community:
 1. Create/register the plugin in Figma and replace the placeholder `manifest.json` ID (`000000000000000000`) with the assigned numeric Plugin ID.
 2. Confirm the final product name and support contact.
 3. Prepare the icon, cover, screenshots, Community description, and privacy disclosure.
-4. Configure a one-time payment price, then confirm the commercial terms and
-   Pro feature list.
-5. Re-run `npm run check` and the manual scenarios below.
+4. Re-run `npm run check` and the manual scenarios below.
 
-The manifest requests the Figma `payments` permission. In a local development
-manifest or an unsupported runtime, the plugin safely remains in Free mode.
-The payment implementation is isolated in `src/core/entitlements.ts`, so the
-geometry and document model do not depend on a server or user account.
+The local development manifest does not request the Figma Payments permission. The plugin keeps all functionality available in local development and published builds.
 
 ## Manual QA matrix
 
@@ -130,17 +108,16 @@ geometry and document model do not depend on a server or user account.
 - Two layers arranged horizontally, vertically, diagonally, rotated, and in Auto Layout.
 - Layers in the same poster Frame and layers across top-level Frames.
 - Move or delete source layers, then update.
-- Natural/Loop, S-curve/Wave Pro paths, three line characters, three head styles,
+- Natural/Loop, S-curve/Wave paths, three line characters, three head styles,
   solid/dashed/dotted patterns, three widths, common/custom colors, and three
   head sizes.
-- Five Pro trial arrow slots: the first use of a Pro capability on an arrow
-  decrements the count once; repeated updates to that same trial arrow do not
-  decrement it. Verify the sixth Pro arrow opens the purchase prompt.
+- Save, apply, overwrite, rename, and delete presets containing advanced visual settings.
 - Confirm the default Medium head is 120% of the old default, Hollow has even
   wall thickness, dash gaps are about 70% of a dash, and Double-drawn creates
   two visibly distinct but related passes.
 - Confirm the first setting click creates an arrow and later setting clicks
   update that selected arrow without duplicates.
+- Select commercial-build arrows and presets, then verify their advanced settings remain available and editable.
 - Light/dark themes and Chinese/English UI.
 - Reopen the plugin and confirm the last settings persist.
 
@@ -148,6 +125,6 @@ geometry and document model do not depend on a server or user account.
 
 - Figma Design only.
 - Arbitrary custom Pen/Pencil path import is planned for a later release;
-  the built-in S-curve and Wave templates are available in Pro.
+  the built-in S-curve and Wave templates are available for free.
 - Arrows do not update in the background; Figma plugins cannot stay running after they are closed.
 - Two-layer connection uses oriented rectangular bounds for predictable performance.

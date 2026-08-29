@@ -17,7 +17,6 @@ import {
 import {
   clampSettings,
   DEFAULT_SETTINGS,
-  freeSettings,
   headScaleForSize,
   STROKE_WIDTHS,
 } from '../src/shared/types'
@@ -93,27 +92,30 @@ describe('arrow generation', () => {
     expect(first.shaftPath).not.toBe(second.shaftPath)
   })
 
-  it('keeps the free controls while clamping legacy settings', () => {
-    const legacy = clampSettings({ style: 'loop', color: { r: 0.4, g: 0.5, b: 0.6 } })
-    expect(legacy.style).toBe('loop')
-    expect(legacy.lineStyle).toBe(DEFAULT_SETTINGS.lineStyle)
-    expect(legacy.headStyle).toBe(DEFAULT_SETTINGS.headStyle)
-    expect(legacy.color).toEqual({ r: 0.4, g: 0.5, b: 0.6 })
+  it('keeps every supported visual control while clamping legacy settings', () => {
+    const settings = clampSettings({
+      style: 'wave',
+      lineStyle: 'double-drawn',
+      headStyle: 'hollow',
+      strokePattern: 'dotted',
+      color: { r: 0.4, g: 0.5, b: 0.6 },
+      headSize: 'large',
+      reversed: true,
+    })
+    expect(settings.style).toBe('wave')
+    expect(settings.lineStyle).toBe('double-drawn')
+    expect(settings.headStyle).toBe('hollow')
+    expect(settings.strokePattern).toBe('dotted')
+    expect(settings.color).toEqual({ r: 0.4, g: 0.5, b: 0.6 })
+    expect(settings.headSize).toBe('large')
+    expect(settings.reversed).toBe(true)
 
     const migrated = clampSettings({ brush: 'pencil', headScale: 1, roughness: 0.8 })
     expect(migrated.lineStyle).toBe('sketch')
     expect(migrated.headSize).toBe('small')
     expect(clampSettings({ headStyle: 'open' }).headStyle).toBe('path')
-
-    const free = freeSettings({ style: 'spiral', brush: 'ink', headStyle: 'path', strokePattern: 'dotted', headScale: 1.5, reversed: true })
-    expect(free.style).toBe('natural')
-    expect(free.lineStyle).toBe('clean')
-    expect(free.headStyle).toBe('solid')
-    expect(free.strokePattern).toBe('solid')
-    expect(free.headSize).toBe('large')
-    expect(free.reversed).toBe(true)
     expect(clampSettings({ style: 'emphasis' }).style).toBe('natural')
-    expect(freeSettings({ headSize: 'small' }).headSize).toBe('small')
+    expect(clampSettings({ style: 'spiral' }).style).toBe('natural')
   })
 
   it('normalizes line widths to the three stable presets', () => {

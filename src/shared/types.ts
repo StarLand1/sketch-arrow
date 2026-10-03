@@ -99,7 +99,7 @@ export interface ArrowMetadataV5 {
   sourceNodeIds: string[]
   seed: number
   settings: ArrowSettings
-  /** Deprecated compatibility marker from the commercial build. */
+  /** True once this arrow has first used a Pro trial capability. */
   proTrialClaimed: boolean
   /** Internal authored side retained when a V1–V4 arrow is migrated. */
   bend: -1 | 1
@@ -114,6 +114,15 @@ export interface UserPreset {
   settings: ArrowSettings
   createdAt: number
   updatedAt: number
+}
+
+export type PaymentStatus = 'PAID' | 'UNPAID' | 'NOT_SUPPORTED'
+
+export interface EntitlementSnapshot {
+  tier: 'free' | 'pro'
+  paymentStatus: PaymentStatus
+  /** Remaining Pro arrow slots for an unpaid user. */
+  trialRemaining: number
 }
 
 export interface UserPreferences {
@@ -149,14 +158,17 @@ export type UiToPluginMessage =
   | { type: 'ui-ready'; locale: Locale }
   | { type: 'apply-settings'; settings: ArrowSettings; action?: ApplySettingsAction }
   | { type: 'save-preferences'; preferences: UserPreferences }
+  | { type: 'checkout' }
 
 export type PluginToUiMessage =
   | {
       type: 'bootstrap'
       selection: SelectionSnapshot
       preferences: UserPreferences
+      entitlement: EntitlementSnapshot
     }
   | { type: 'selection'; selection: SelectionSnapshot }
+  | { type: 'entitlement'; entitlement: EntitlementSnapshot }
   | {
       type: 'operation-result'
       ok: boolean
@@ -167,6 +179,8 @@ export type PluginToUiMessage =
         | 'source-missing'
         | 'too-close'
         | 'readonly'
+        | 'premium-required'
+        | 'payment-unavailable'
         | 'unexpected'
     }
 
@@ -185,6 +199,17 @@ export function clampSettings(input: ArrowSettingsInput | undefined): ArrowSetti
     strokeWidth: nearestStrokeWidth(source.strokeWidth),
     headSize: normalizeHeadSize(source),
     reversed: Boolean(source.reversed),
+  }
+}
+
+export function freeSettings(input: ArrowSettingsInput | undefined): ArrowSettings {
+  const settings = clampSettings(input)
+  return {
+    ...settings,
+    style: settings.style === 'loop' ? 'loop' : 'natural',
+    lineStyle: 'clean',
+    headStyle: 'solid',
+    strokePattern: 'solid',
   }
 }
 

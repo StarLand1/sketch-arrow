@@ -9,12 +9,15 @@ import {
   type AffineTransform,
   type Point,
 } from '../core/geometry'
+import { claimProTrial, entitlements, getCommercialEntitlement } from '../core/entitlements'
 import {
   clampSettings,
   DEFAULT_SETTINGS,
+  freeSettings,
   type ArrowMetadataV5,
   type ArrowSettings,
   type ArrowSettingsInput,
+  type EntitlementSnapshot,
   type Locale,
   type PluginToUiMessage,
   type SelectionSnapshot,
@@ -60,7 +63,20 @@ figma.ui.onmessage = async (message: UiToPluginMessage) => {
         type: 'bootstrap',
         selection: getSelectionSnapshot(),
         preferences,
+        entitlement: await getCommercialEntitlement(),
       })
+      return
+    }
+    if (message.type === 'checkout') {
+      try {
+        await entitlements.checkout()
+        sendToUi({ type: 'entitlement', entitlement: await getCommercialEntitlement() })
+      } catch (error) {
+        throw new PluginOperationError(
+          'payment-unavailable',
+          error instanceof Error ? error.message : 'Payment checkout is unavailable.',
+        )
+      }
       return
     }
     if (message.type === 'save-preferences') {
@@ -69,16 +85,18 @@ figma.ui.onmessage = async (message: UiToPluginMessage) => {
     }
     if (message.type === 'apply-settings') {
       const selectedArrow = findSelectedArrowGroup()
+      let entitlement: EntitlementSnapshot
       if (selectedArrow) {
-        await updateSelectedArrow(
+        entitlement = await updateSelectedArrow(
           clampSettings(message.settings),
           message.action === 'rerandomize',
         )
         sendToUi({ type: 'operation-result', ok: true, code: 'updated' })
       } else {
-        await generateFromSelection(message.settings)
+        entitlement = await generateFromSelection(message.settings)
         sendToUi({ type: 'operation-result', ok: true, code: 'generated' })
       }
+      sendToUi({ type: 'entitlement', entitlement })
     }
   } catch (error) {
     const operationError = normalizeError(error)
@@ -88,25 +106,93 @@ figma.ui.onmessage = async (message: UiToPluginMessage) => {
   }
 }
 
-async function generateFromSelection(input: ArrowSettings): Promise<void> {
+interface ArrowAuthorization {
+  settings: ArrowSettings
+  entitlement: Awaited<ReturnType<typeof getCommercialEntitlement>>
+  proTrialClaimed: boolean
+}
+
+async function authorizeNewArrow(
+  input: ArrowSettings,
+  sourceMode: 'line' | 'two-nodes',
+): Promise<ArrowAuthorization> {
   const settings = clampSettings(input)
+  const entitlement = await getCommercialEntitlement()
+  const needsPro = sourceMode === 'two-nodes' || requiresProSettings(settings)
+  if (entitlement.tier === 'pro') {
+    return { settings, entitlement, proTrialClaimed: false }
+  }
+  if (!needsPro) {
+    return { settings: freeSettings(settings), entitlement, proTrialClaimed: false }
+  }
+  const trial = await claimProTrial()
+  if (!trial) {
+    throw new PluginOperationError('premium-required', 'This feature requires Sketch Arrow Pro.')
+  }
+  return { settings, entitlement: trial, proTrialClaimed: true }
+}
+
+function settingsForExistingUpdate(
+  previous: ArrowSettings,
+  requested: ArrowSettings,
+): ArrowSettings {
+  // Do not downgrade an existing Pro-shaped arrow. Free users can still edit
+  // the permanently free controls while preserving the old visual settings.
+  return {
+    ...previous,
+    style: isFreeStyle(requested.style) ? requested.style : previous.style,
+    lineStyle: requested.lineStyle === 'clean' ? 'clean' : previous.lineStyle,
+    headStyle: requested.headStyle === 'solid' ? 'solid' : previous.headStyle,
+    strokePattern: requested.strokePattern === 'solid' ? 'solid' : previous.strokePattern,
+    headSize: requested.headSize,
+    color: requested.color,
+    strokeWidth: requested.strokeWidth,
+    reversed: requested.reversed,
+  }
+}
+
+function isFreeStyle(style: ArrowSettings['style']): style is 'natural' | 'loop' {
+  return style === 'natural' || style === 'loop'
+}
+
+function requiresProSettings(settings: ArrowSettings): boolean {
+  return !isFreeStyle(settings.style)
+    || settings.lineStyle !== 'clean'
+    || settings.headStyle !== 'solid'
+    || settings.strokePattern !== 'solid'
+}
+
+function changesToProSettings(previous: ArrowSettings, requested: ArrowSettings): boolean {
+  return (!isFreeStyle(requested.style) && requested.style !== previous.style)
+    || (requested.lineStyle !== 'clean' && requested.lineStyle !== previous.lineStyle)
+    || (requested.headStyle !== 'solid' && requested.headStyle !== previous.headStyle)
+    || (requested.strokePattern !== 'solid' && requested.strokePattern !== previous.strokePattern)
+}
+
+async function generateFromSelection(input: ArrowSettings): Promise<Awaited<ReturnType<typeof getCommercialEntitlement>>> {
   const selection = figma.currentPage.selection
   if (selection.length === 1 && selection[0].type === 'LINE') {
+    if (!(await entitlements.canUse('line-generation'))) throw new Error('Feature is unavailable')
     if (hasProtectedAncestor(selection[0])) {
       throw new PluginOperationError('readonly', 'The selected line is inside a component or instance.')
     }
-    await generateFromLine(selection[0], settings)
-    return
+    const authorization = await authorizeNewArrow(input, 'line')
+    await generateFromLine(selection[0], authorization.settings, authorization.proTrialClaimed)
+    return authorization.entitlement
   }
   if (selection.length === 2 && selection.every(hasGeometry)) {
-    const connection = connectionForNodes(selection[0], selection[1], settings.strokeWidth)
-    await generateFromTwoNodes(selection[0], selection[1], settings, connection)
-    return
+    // Validate the connection before claiming a trial, so invalid selections
+    // never consume one of the five Pro experiences.
+    const requested = clampSettings(input)
+    const connection = connectionForNodes(selection[0], selection[1], requested.strokeWidth)
+    const authorization = await authorizeNewArrow(requested, 'two-nodes')
+    await generateFromTwoNodes(selection[0], selection[1], authorization.settings, authorization.proTrialClaimed, connection)
+    return authorization.entitlement
   }
   throw new PluginOperationError('invalid-selection', 'Select one line or two layers.')
 }
 
-async function generateFromLine(line: LineNode, settings: ArrowSettings): Promise<void> {
+async function generateFromLine(line: LineNode, settings: ArrowSettings, proTrialClaimed: boolean): Promise<void> {
   const target = findSafeContainerForNode(line)
   const [start, end] = lineEndpoints(line.width, asAffine(line.absoluteTransform))
   const seed = createSeed()
@@ -116,7 +202,7 @@ async function generateFromLine(line: LineNode, settings: ArrowSettings): Promis
     sourceNodeIds: [line.id],
     seed,
     settings,
-    proTrialClaimed: false,
+    proTrialClaimed,
     bend: 1,
     loopRendering: { crossingStyle: 'knot', overpass: 'tail' },
   }
@@ -128,6 +214,7 @@ async function generateFromTwoNodes(
   first: SceneNode,
   second: SceneNode,
   settings: ArrowSettings,
+  proTrialClaimed: boolean,
   connection = connectionForNodes(first, second, settings.strokeWidth),
 ): Promise<void> {
   const target = findCommonSafeContainer(first, second)
@@ -138,7 +225,7 @@ async function generateFromTwoNodes(
     sourceNodeIds: [first.id, second.id],
     seed,
     settings,
-    proTrialClaimed: false,
+    proTrialClaimed,
     bend: 1,
     loopRendering: { crossingStyle: 'knot', overpass: 'tail' },
   }
@@ -149,7 +236,7 @@ async function generateFromTwoNodes(
 async function updateSelectedArrow(
   settings: ArrowSettings,
   rerandomize = false,
-): Promise<void> {
+): Promise<Awaited<ReturnType<typeof getCommercialEntitlement>>> {
   const group = findSelectedArrowGroup()
   if (!group) throw new PluginOperationError('invalid-selection', 'Select a generated Sketch Arrow group.')
   const existing = readMetadata(group)
@@ -174,19 +261,36 @@ async function updateSelectedArrow(
     if (!first || !second || !isSceneNode(first) || !isSceneNode(second) || !hasGeometry(first) || !hasGeometry(second)) {
       throw new PluginOperationError('source-missing', 'One or both source layers no longer exist.')
     }
+    // Width is permanently free, so it is safe to validate this connection
+    // before a trial is claimed for an advanced visual setting.
     const connection = connectionForNodes(first, second, requestedSettings.strokeWidth)
     start = connection.start
     end = connection.end
+  }
+
+  let entitlement = await getCommercialEntitlement()
+  let effectiveSettings: ArrowSettings
+  let proTrialClaimed = existing.proTrialClaimed
+  if (entitlement.tier === 'pro' || existing.proTrialClaimed) {
+    effectiveSettings = requestedSettings
+  } else if (changesToProSettings(existing.settings, requestedSettings)) {
+    const trial = await claimProTrial()
+    if (!trial) {
+      throw new PluginOperationError('premium-required', 'This feature requires Sketch Arrow Pro.')
+    }
+    entitlement = trial
+    effectiveSettings = requestedSettings
+    proTrialClaimed = true
+  } else {
+    effectiveSettings = settingsForExistingUpdate(existing.settings, requestedSettings)
   }
 
   const metadata: ArrowMetadataV5 = {
     ...existing,
     version: 5,
     seed: rerandomize ? createSeed() : existing.seed,
-    settings: requestedSettings,
-    // Preserve the legacy field while the V5 metadata remains readable by
-    // both the commercial checkpoint and the free build.
-    proTrialClaimed: existing.proTrialClaimed,
+    settings: effectiveSettings,
+    proTrialClaimed,
     loopRendering: { crossingStyle: 'knot', overpass: 'tail' },
   }
 
@@ -198,6 +302,7 @@ async function updateSelectedArrow(
   const replacement = createArrowGroup(target, start, end, metadata, guideForNewGroup)
   group.remove()
   selectAndReveal(replacement)
+  return entitlement
 }
 
 function createArrowGroup(

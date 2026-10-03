@@ -8,6 +8,7 @@ import {
   type ApplySettingsAction,
   type ArrowSettings,
   type ArrowStyle,
+  type EntitlementSnapshot,
   type HeadSize,
   type LineStyle,
   type Locale,
@@ -20,6 +21,7 @@ import {
 } from '../shared/types'
 
 const EMPTY_SELECTION: SelectionSnapshot = { kind: 'invalid', title: '', detail: '', nodeNames: [] }
+const FREE_ENTITLEMENT: EntitlementSnapshot = { tier: 'free', paymentStatus: 'UNPAID', trialRemaining: 0 }
 const PATH_STYLES: ArrowStyle[] = ['natural', 'loop', 's-curve', 'wave']
 const COMMON_COLORS: Array<{ name: string; color: RgbColor }> = [
   { name: 'Black', color: { r: 0.13, g: 0.13, b: 0.14 } },
@@ -43,8 +45,10 @@ function App() {
   const [locale, setLocale] = useState<Locale>(systemLocale)
   const [settings, setSettings] = useState<ArrowSettings>(DEFAULT_SETTINGS)
   const [selection, setSelection] = useState<SelectionSnapshot>(EMPTY_SELECTION)
+  const [entitlement, setEntitlement] = useState<EntitlementSnapshot>(FREE_ENTITLEMENT)
   const [presets, setPresets] = useState<UserPreset[]>([])
   const [bootstrapped, setBootstrapped] = useState(false)
+  const [showUpgrade, setShowUpgrade] = useState(false)
   const [presetDialog, setPresetDialog] = useState<PresetDialogState | null>(null)
   const [showPresetManager, setShowPresetManager] = useState(false)
   const [selectedPresetId, setSelectedPresetId] = useState('')
@@ -58,6 +62,9 @@ function App() {
   const hasApplicableSelection = selection.kind === 'line'
     || selection.kind === 'two-nodes'
     || selection.kind === 'generated-arrow'
+  const isPro = entitlement.tier === 'pro'
+  const hasProTrial = !isPro && entitlement.trialRemaining > 0
+  const hasProControls = isPro || hasProTrial
 
   useEffect(() => { localeRef.current = locale }, [locale])
 
@@ -70,12 +77,18 @@ function App() {
         setSelection(message.selection)
         setSettings(message.selection.metadata?.settings ?? message.preferences.settings)
         setPresets(message.preferences.presets ?? [])
+        setEntitlement(message.entitlement)
         setBootstrapped(true)
         return
       }
       if (message.type === 'selection') {
         setSelection(message.selection)
         if (message.selection.metadata) setSettings(message.selection.metadata.settings)
+        return
+      }
+      if (message.type === 'entitlement') {
+        setEntitlement(message.entitlement)
+        if (message.entitlement.tier === 'pro') setShowUpgrade(false)
         return
       }
       if (message.type === 'operation-result') {
@@ -90,6 +103,7 @@ function App() {
         // Instant updates should feel quiet; success feedback is useful on the
         // first generation, while errors always remain visible.
         if (message.ok && message.code === 'updated') return
+        if (!message.ok && message.code === 'premium-required') setShowUpgrade(true)
         const operationCopy = getStrings(localeRef.current).operation
         const copy = operationCopy[message.code] ?? operationCopy.unexpected
         showFeedback(copy, message.ok)
@@ -110,6 +124,8 @@ function App() {
     }, 180)
     return () => window.clearTimeout(timer)
   }, [bootstrapped, locale, settings, presets])
+
+  function requestUpgrade() { setShowUpgrade(true) }
 
   function showFeedback(text: string, ok = true) {
     setToast({ ok, text })
@@ -133,6 +149,10 @@ function App() {
   }
 
   function updateSetting<K extends keyof ArrowSettings>(key: K, value: ArrowSettings[K]) {
+    if (!hasProControls && key === 'lineStyle' && value !== 'clean') return requestUpgrade()
+    if (!hasProControls && key === 'headStyle' && value !== 'solid') return requestUpgrade()
+    if (!hasProControls && key === 'strokePattern' && value !== 'solid') return requestUpgrade()
+    if (!hasProControls && key === 'style' && value !== 'natural' && value !== 'loop') return requestUpgrade()
     applySettings({ ...settings, [key]: value })
   }
 
@@ -145,6 +165,7 @@ function App() {
   }
 
   function savePreset() {
+    if (!isPro) return requestUpgrade()
     setPresetDialog({ mode: 'save', value: `${strings.preset} ${presets.length + 1}` })
   }
 
@@ -176,6 +197,7 @@ function App() {
   }
 
   function usePreset(preset: UserPreset) {
+    if (!isPro) return requestUpgrade()
     applySettings({ ...preset.settings, reversed: settings.reversed })
     showFeedback(strings.presetApplied)
   }
@@ -190,6 +212,7 @@ function App() {
   }
 
   function overwritePreset(presetId: string) {
+    if (!isPro) return requestUpgrade()
     const now = Date.now()
     setPresets((current) => current.map((preset) => preset.id === presetId
       ? { ...preset, settings: presetSettings(settings), updatedAt: now }
@@ -198,10 +221,12 @@ function App() {
   }
 
   function renamePreset(preset: UserPreset) {
+    if (!isPro) return requestUpgrade()
     setPresetDialog({ mode: 'rename', presetId: preset.id, value: preset.name })
   }
 
   function deletePreset(presetId: string) {
+    if (!isPro) return requestUpgrade()
     setPresets((current) => current.filter((preset) => preset.id !== presetId))
     showFeedback(strings.presetDeleted)
   }
@@ -212,7 +237,7 @@ function App() {
         <div className="brand">
           <ArrowMark />
           <span>{strings.appName}</span>
-          <span className="badge">{strings.free}</span>
+          <span className="badge">{isPro ? strings.pro : strings.free}</span>
         </div>
         <div className="language-switch" role="group" aria-label="Language">
           <button className={locale === 'zh-CN' ? 'active' : ''} onClick={() => setLocale('zh-CN')}>中</button>
@@ -228,8 +253,10 @@ function App() {
           {selection.nodeNames.length > 0 && (
             <div className="node-list">{selection.nodeNames.map((name, index) => <span key={`${name}-${index}`}>{name}</span>)}</div>
           )}
+          {selection.kind === 'two-nodes' && !isPro && <span className="pro-badge">{strings.pro}</span>}
         </div>
       </section>
+      {hasProTrial && <p className="trial-note">{strings.proTrialRemaining.replace('{count}', String(entitlement.trialRemaining))}</p>}
 
       <section className="control-section presets-section">
         <div className="section-heading">
@@ -247,7 +274,7 @@ function App() {
             onSelect={selectPreset}
           />
           <button className="secondary-button preset-save-button" onClick={savePreset}>
-            <span>{strings.savePreset}</span>
+            <span>{strings.savePreset}</span><span className="button-pro-tag">{strings.pro}</span>
           </button>
         </div>
         {showPresetManager && (
@@ -276,13 +303,17 @@ function App() {
         <div className="section-heading"><ControlLabel>{strings.pathShape}</ControlLabel></div>
         <div className="style-grid path-grid">
           {PATH_STYLES.map((style) => {
+            const locked = !hasProControls && style !== 'natural' && style !== 'loop'
+            const pro = style !== 'natural' && style !== 'loop'
             const label = style === 'natural' ? strings.natural : style === 'loop' ? strings.loop : strings.styles[style]
             return <StyleButton
               key={style}
               active={settings.style === style}
               label={label}
               preview={style}
-              onClick={() => updateSetting('style', style)}
+              pro={pro}
+              locked={locked}
+              onClick={() => locked ? requestUpgrade() : updateSetting('style', style)}
             />
           })}
         </div>
@@ -303,7 +334,9 @@ function App() {
             values={['small', 'medium', 'large']}
             selected={settings.headSize}
             labels={strings.headSizes}
+            lockedValues={[]}
             onSelect={(value) => updateSetting('headSize', value as HeadSize)}
+            onUpgrade={requestUpgrade}
             preview="head-size"
           />
         </div>
@@ -314,7 +347,10 @@ function App() {
             values={['solid', 'dashed', 'dotted']}
             selected={settings.strokePattern}
             labels={strings.patterns}
+            proValues={['dashed', 'dotted']}
+            lockedValues={!hasProControls ? ['dashed', 'dotted'] : []}
             onSelect={(value) => updateSetting('strokePattern', value as StrokePattern)}
+            onUpgrade={requestUpgrade}
             preview="pattern"
           />
         </div>
@@ -325,7 +361,10 @@ function App() {
             values={['clean', 'sketch', 'double-drawn']}
             selected={settings.lineStyle}
             labels={strings.lineStyles}
+            proValues={['sketch', 'double-drawn']}
+            lockedValues={!hasProControls ? ['sketch', 'double-drawn'] : []}
             onSelect={(value) => updateSetting('lineStyle', value as LineStyle)}
+            onUpgrade={requestUpgrade}
             preview="line-style"
           />
         </div>
@@ -336,7 +375,10 @@ function App() {
             values={['solid', 'hollow', 'path']}
             selected={settings.headStyle}
             labels={strings.heads}
+            proValues={['hollow', 'path']}
+            lockedValues={!hasProControls ? ['hollow', 'path'] : []}
             onSelect={(value) => updateSetting('headStyle', value as ArrowSettings['headStyle'])}
+            onUpgrade={requestUpgrade}
             preview="head"
           />
         </div>
@@ -349,6 +391,7 @@ function App() {
 
       <p className="apply-hint">{strings.hint}</p>
 
+      {showUpgrade && <UpgradePanel strings={strings} status={entitlement.paymentStatus} onClose={() => setShowUpgrade(false)} onCheckout={() => postToPlugin({ type: 'checkout' })} />}
       {presetDialog && <PresetDialog strings={strings} state={presetDialog} onClose={() => setPresetDialog(null)} onSubmit={submitPresetDialog} />}
       {toast && <div className={`toast ${toast.ok ? 'success' : 'error'}`}>{toast.text}</div>}
     </main>
@@ -479,8 +522,9 @@ function offsetPreviewPath(style: ArrowStyle): string {
   return 'M8 30 C37 5 76 9 101 26'
 }
 
-function StyleButton({ active, label, preview, onClick }: { active: boolean; label: string; preview: ArrowStyle; onClick: () => void }) {
-  return <button aria-label={label} title={label} data-tooltip={label} aria-pressed={active} className={`style-button ${active ? 'active' : ''}`} onClick={onClick}>
+function StyleButton({ active, label, preview, pro = false, locked = false, onClick }: { active: boolean; label: string; preview: ArrowStyle; pro?: boolean; locked?: boolean; onClick: () => void }) {
+  return <button aria-label={label} title={label} data-tooltip={label} aria-pressed={active} className={`style-button ${active ? 'active' : ''} ${locked ? 'locked' : ''}`} onClick={onClick}>
+    {pro && <span className="option-pro-tag">PRO</span>}
     <svg viewBox="0 0 112 40" aria-hidden="true"><path d={stylePreviewPath(preview)} /></svg>
   </button>
 }
@@ -508,9 +552,11 @@ function WidthField({ label, value, labels, onChange }: { label: string; value: 
 
 type OptionPreviewKind = 'pattern' | 'head' | 'head-size' | 'line-style'
 
-function OptionGrid({ values, selected, labels, onSelect, preview }: { values: string[]; selected: string; labels: Record<string, string>; onSelect: (value: string) => void; preview?: OptionPreviewKind }) {
+function OptionGrid({ values, selected, labels, lockedValues = [], proValues = [], onSelect, onUpgrade, preview }: { values: string[]; selected: string; labels: Record<string, string>; lockedValues?: string[]; proValues?: string[]; onSelect: (value: string) => void; onUpgrade: () => void; preview?: OptionPreviewKind }) {
   return <div className="option-grid option-grid-three">{values.map((value) => {
-    return <button key={value} aria-label={labels[value]} title={labels[value]} data-tooltip={labels[value]} aria-pressed={selected === value} className={`option-button ${selected === value ? 'active' : ''}`} onClick={() => onSelect(value)}>
+    const locked = lockedValues.includes(value)
+    return <button key={value} aria-label={labels[value]} title={labels[value]} data-tooltip={labels[value]} aria-pressed={selected === value} className={`option-button ${selected === value ? 'active' : ''} ${locked ? 'locked' : ''}`} onClick={() => locked ? onUpgrade() : onSelect(value)}>
+      {proValues.includes(value) && <span className="option-pro-tag">PRO</span>}
       {preview && <OptionPreview kind={preview} value={value} />}
     </button>
   })}</div>
@@ -539,6 +585,10 @@ function ColorField({ label, value, onChange, strings }: { label: string; value:
     <div className="color-swatches common-swatches">{COMMON_COLORS.map((item) => <button key={item.name} className={sameColor(item.color, value) ? 'active' : ''} title={item.name} aria-label={item.name} style={{ background: rgbToHex(item.color) }} onClick={() => onChange(item.color)} />)}</div>
     <small>{strings.localOnly}</small>
   </div>
+}
+
+function UpgradePanel({ strings, status, onClose, onCheckout }: { strings: ReturnType<typeof getStrings>; status: EntitlementSnapshot['paymentStatus']; onClose: () => void; onCheckout: () => void }) {
+  return <div className="upgrade-backdrop"><section className="upgrade-panel"><button className="close-button" onClick={onClose}>×</button><h2>{strings.upgradeTitle}</h2><p>{strings.upgradeDescription}</p><ul><li>{strings.upgradeItems.parameters}</li><li>{strings.upgradeItems.styles}</li><li>{strings.upgradeItems.presets}</li></ul>{status === 'NOT_SUPPORTED' && <p className="upgrade-error">{strings.paymentUnavailable}</p>}<button className="primary-button" disabled={status === 'NOT_SUPPORTED'} onClick={onCheckout}>{strings.upgradeButton}</button></section></div>
 }
 
 function PresetDialog({ strings, state, onClose, onSubmit }: { strings: ReturnType<typeof getStrings>; state: PresetDialogState; onClose: () => void; onSubmit: (name: string) => void }) {
